@@ -1,0 +1,110 @@
+# See https://docs.github.com/en/actions/creating-actions/creating-a-composite-action
+
+name: OBS Submission
+description: Submit the sources by running the "osc:sr" YaST Rake task
+
+inputs:
+  task:
+    # allow changing the default rake task, some packages are only
+    # comitted to YaST:Head project without submitting to openSUSE Factory,
+    # use "osc:commit" in that case
+    description: Rake task to run
+    default: osc:sr
+
+  obs_user:
+    description: OBS user name
+    required: true
+
+  obs_password:
+    description: OBS password
+    required: true
+
+runs:
+  using: composite
+
+  steps:
+    - name: Git Checkout
+      uses: actions/checkout@v4
+
+    - name: Start the YaST container
+      shell: bash
+      run: sudo podman run --privileged --detach --name yast -e CI -e GITHUB_ACTIONS
+        -v ${{ github.action_path }}:/action -v .:/checkout -w /checkout
+        registry.opensuse.org/yast/head/containers_tumbleweed/yast-rake:latest
+        tail -f /dev/null
+
+    - name: Fix permissions to avoid git failures
+      shell: bash
+      run: sudo podman exec yast chown -R 0 .
+
+    - name: Configure osc
+      shell: bash
+      run: sudo --preserve-env=OBS_USER,OBS_PASSWORD podman exec -e OBS_USER -e OBS_PASSWORD yast /action/src/configure_osc.sh
+      env:
+        OBS_USER: ${{ inputs.obs_user }}
+        OBS_PASSWORD: ${{ inputs.obs_password }}
+
+    - name: Run rake
+      shell: bash
+      id: rake
+      run: |
+        OUTFILE=$(mktemp -p '' yast_rake_XXXXXXX)
+        sudo podman exec --privileged yast rake ${{ inputs.task }} | tee $OUTFILE
+        SR=$((grep "^created request id [0-9]+" $OUTFILE || true) | sed -e 's/created request id //')
+        # pass the SR number
+        echo "submit=$SR" >> $GITHUB_OUTPUT
+        rm $OUTFILE
+
+    - name: Success status comment
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        SUBMIT:   ${{ steps.rake.outputs.submit }}
+      # find the pull request for this git checkout and add a comment with submission details
+      run: |
+        PR=$(gh pr list --state merged --search ${{ github.sha }} --json number --jq '.[0].number')
+
+        if [ -n "$PR" ]; then
+          echo "Found pull request $PR (${{ github.server_url }}/${{ github.repository }}/pull/$PR)"
+          JOB_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          MSG=":white_check_mark: Autosubmission job [#${{ github.run_id }}]($JOB_URL) successfully finished"
+
+          if echo "$SUBMIT" | grep -q "^[0-9]\+$"; then
+            SR_URL="https://build.opensuse.org/request/show/$SUBMIT"
+            echo "Created submit request $SUBMIT ($SR_URL)"
+            MSG="$MSG
+        :white_check_mark: Created submit request [#$SUBMIT]($SR_URL)"
+          fi
+
+          gh issue comment $PR --body "$MSG"
+        else
+          echo "Pull request not found, skipping status comment"
+        fi
+
+    - name: Failed status comment
+      shell: bash
+      # not succeeded (failed, aborted, ...)
+      if: ${{ !success() }}
+      env:
+        GH_TOKEN: ${{ github.token }}
+      # find the pull request for this git checkout and add a comment with failure details
+      run: |
+        PR=$(gh pr list --state merged --search ${{ github.sha }} --json number --jq '.[0].number')
+
+        if [ -n "$PR" ]; then
+          echo "Found pull request $PR (${{ github.server_url }}/${{ github.repository }}/pull/$PR)"
+          JOB_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          MSG=":x: Autosubmission job [#${{ github.run_id }}]($JOB_URL) failed"
+          gh issue comment $PR --body "$MSG"
+        else
+          echo "Pull request not found, skipping status comment"
+        fi
+
+    - name: Stop the YaST container
+      shell: bash
+      run: sudo podman stop yast
+
+    # the checkout action does some cleanup at the end, restore the original permissions
+    - name: Restore permissions
+      shell: bash
+      run: sudo chown -R runner:docker .
