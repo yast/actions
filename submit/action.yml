@@ -29,6 +29,7 @@ runs:
     - name: Start the YaST container
       shell: bash
       run: sudo podman run --privileged --detach --name yast -e CI -e GITHUB_ACTIONS
+        -e LC_ALL=en_US.UTF-8 -e LANG=en_US.UTF-8
         -v ${{ github.action_path }}:/action -v .:/checkout -w /checkout
         registry.opensuse.org/yast/head/containers_tumbleweed/yast-rake:latest
         tail -f /dev/null
