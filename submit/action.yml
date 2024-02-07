@@ -50,7 +50,7 @@ runs:
       run: |
         OUTFILE=$(mktemp -p '' yast_rake_XXXXXXX)
         sudo podman exec --privileged yast rake ${{ inputs.task }} | tee $OUTFILE
-        SR=$((grep "^created request id [0-9]+" $OUTFILE || true) | sed -e 's/created request id //')
+        SR=$((grep "^created request id [0-9]\+" $OUTFILE || true) | sed -e 's/created request id //')
         # pass the SR number
         echo "submit=$SR" >> $GITHUB_OUTPUT
         rm $OUTFILE
@@ -102,9 +102,12 @@ runs:
 
     - name: Stop the YaST container
       shell: bash
-      run: sudo podman stop yast
+      run: |
+        sudo podman stop yast
+        sudo podman rm yast
 
     # the checkout action does some cleanup at the end, restore the original permissions
     - name: Restore permissions
+      if: ${{ always() }}
       shell: bash
       run: sudo chown -R runner:docker .
