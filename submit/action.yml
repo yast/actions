@@ -11,6 +11,13 @@ inputs:
     description: Rake task to run
     default: osc:sr
 
+  command:
+    # allow running arbitrary command instead of `rake`, useful for multi build
+    # packages to build all package flavors before submission,
+    # example: "rake 'osc:build[-M default]' && rake 'osc:build[-M micro]' && rake osc:sr"
+    description: Custom command to run (the default is 'rake')
+    default: ""
+
   obs_user:
     description: OBS user name
     required: true
@@ -48,8 +55,13 @@ runs:
       shell: bash
       id: rake
       run: |
+        CMD="${{ inputs.command }}"
+        if [ -z "$CMD" ]; then
+          CMD="rake '${{ inputs.task }}'"
+        fi
+
         OUTFILE=$(mktemp -p '' yast_rake_XXXXXXX)
-        sudo podman exec --privileged yast rake ${{ inputs.task }} | tee $OUTFILE
+        sudo podman exec --privileged yast bash -c "$CMD" | tee $OUTFILE
         SR=$((grep "^created request id [0-9]\+" $OUTFILE || true) | sed -e 's/created request id //')
         # pass the SR number
         echo "submit=$SR" >> $GITHUB_OUTPUT
