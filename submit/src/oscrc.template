@@ -5,4 +5,4 @@ apiurl = https://api.opensuse.org
 user=@OBS_USER@
 pass=@OBS_PASSWORD@
 credentials_mgr_class=osc.credentials.PlaintextConfigFileCredentialsManager
-trusted_prj=YaST:Head openSUSE:Factory
+trusted_prj=YaST:Head openSUSE:Factory openSUSE:Tumbleweed
